@@ -1,0 +1,39 @@
+name: Deploy Artifact to Linux VM (Ansible)
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python venv + install Ansible
+        run: |
+          python3 -m venv .venv
+          source .venv/bin/activate
+          pip install ansible
+
+      - name: Write SSH private key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/task5_deploy_key
+          chmod 600 ~/.ssh/task5_deploy_key
+
+      - name: Create inventory from secrets
+        run: |
+          cat > ansible/inventory.ini << EOF2
+          [linux_vm]
+          target ansible_host=${{ secrets.SSH_HOST }} ansible_user=${{ secrets.SSH_USER }} ansible_ssh_private_key_file=~/.ssh/task5_deploy_key ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+          EOF2
+
+      - name: Run Ansible playbook
+        run: |
+          source .venv/bin/activate
+          ansible-playbook -i ansible/inventory.ini ansible/deploy.yml
+
+      - name: Verify deployment
+        run: curl -f http://127.0.0.1:3000
