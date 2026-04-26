@@ -1,0 +1,86 @@
+---
+- name: Deploy artifact to Linux VM
+  hosts: linux_vm
+  become: yes
+  vars:
+    app_dir: /opt/task5-app
+    log_dir: /var/log
+    app_user: vinay
+
+  tasks:
+    - name: Ensure app directory exists
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ app_user }}"
+        mode: '0755'
+
+    - name: Transfer app.js artifact
+      copy:
+        src: ../app/app.js
+        dest: "{{ app_dir }}/app.js"
+        owner: "{{ app_user }}"
+        mode: '0644'
+
+    - name: Transfer package.json
+      copy:
+        src: ../app/package.json
+        dest: "{{ app_dir }}/package.json"
+        owner: "{{ app_user }}"
+        mode: '0644'
+
+    - name: Transfer deploy script
+      copy:
+        src: ../scripts/deploy.sh
+        dest: "{{ app_dir }}/deploy.sh"
+        owner: "{{ app_user }}"
+        mode: '0755'
+
+    - name: Install Node.js if not present
+      shell: |
+        if ! command -v node &> /dev/null; then
+          curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+          apt-get install -y nodejs
+        fi
+      args:
+        executable: /bin/bash
+
+    - name: Install app dependencies
+      shell: cd {{ app_dir }} && npm install --production
+      args:
+        executable: /bin/bash
+
+    - name: Stop existing app if running
+      shell: pkill -f "node {{ app_dir }}/app.js" || true
+      args:
+        executable: /bin/bash
+      ignore_errors: yes
+      failed_when: false
+
+    - name: Start the application
+      shell: |
+        nohup node {{ app_dir }}/app.js > {{ log_dir }}/task5-app.log 2>&1 &
+        echo $! > /var/run/task5-app.pid
+      args:
+        executable: /bin/bash
+
+    - name: Wait for app to start
+      wait_for:
+        port: 3000
+        delay: 2
+        timeout: 30
+
+    - name: Log deployment timestamp
+      shell: echo "Deployed from Ansible at $(date '+%Y-%m-%d %H:%M:%S')" >> {{ log_dir }}/task5-deploy.log
+      args:
+        executable: /bin/bash
+
+    - name: Verify app is responding
+      uri:
+        url: http://localhost:3000
+        return_content: yes
+      register: app_response
+
+    - name: Show app response
+      debug:
+        msg: "App response: {{ app_response.content }}"
